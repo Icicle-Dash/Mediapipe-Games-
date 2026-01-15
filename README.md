@@ -1,1 +1,3 @@
-Wow I just needed to save a base readme file 
+# **Media Pipe Game Collection!** 
+#### Collection of games that use mediapipe for added interactivity.
+
