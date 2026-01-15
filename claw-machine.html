@@ -1,0 +1,909 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pixel Art Claw Machine</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Courier New', monospace;
+            background: #1a1a2e;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+        
+        #game-canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+            image-rendering: pixelated;
+        }
+        
+        #video {
+            position: absolute;
+            top: 0;
+            left: 0;
+            visibility: hidden;
+            width: 640px;
+            height: 480px;
+        }
+        
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 0;
+            right: 0;
+            text-align: center;
+            color: #fff;
+            text-shadow: 2px 2px 0 #000;
+            pointer-events: none;
+            z-index: 100;
+        }
+        
+        #score {
+            font-size: 48px;
+            color: #ff6b6b;
+            margin-bottom: 10px;
+        }
+        
+        #instructions {
+            font-size: 18px;
+            color: #4ecdc4;
+            margin-bottom: 20px;
+        }
+        
+        #game-status {
+            font-size: 24px;
+            color: #ffe66d;
+        }
+        
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            gap: 10px;
+            z-index: 100;
+        }
+        
+        button {
+            padding: 10px 20px;
+            font-family: 'Courier New', monospace;
+            font-size: 16px;
+            background: #ff6b6b;
+            color: #fff;
+            border: 4px solid #fff;
+            cursor: pointer;
+            text-shadow: 1px 1px 0 #000;
+            transition: all 0.1s;
+        }
+        
+        button:hover {
+            background: #ee5a5a;
+            transform: scale(1.05);
+        }
+        
+        button:active {
+            transform: scale(0.95);
+        }
+        
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #fff;
+            font-size: 24px;
+            text-align: center;
+            z-index: 200;
+        }
+        
+        .pixel-border {
+            border: 4px solid;
+            border-color: #ff6b6b #ff6b6b #ff6b6b #ff6b6b;
+            box-shadow: 
+                inset -4px -4px 0 0 #ff6b6b,
+                inset 4px 4px 0 0 #ff6b6b;
+        }
+    </style>
+</head>
+<body>
+    <div id="game-container">
+        <canvas id="game-canvas"></canvas>
+        <video id="video" playsinline></video>
+        
+        <div id="ui">
+            <div id="score">SCORE: 0</div>
+            <div id="instructions">Show hand to control | Fist to grab | Open to release</div>
+            <div id="game-status"></div>
+        </div>
+        
+        <div id="controls">
+            <button id="reset-btn">RESET GAME</button>
+            <button id="camera-btn">TOGGLE CAMERA</button>
+        </div>
+        
+        <div id="loading">Loading MediaPipe Hands...</div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+
+    <script>
+        // Game State
+        const gameState = {
+            score: 0,
+            clawState: 'idle',
+            clawPosition: new THREE.Vector3(0, 0, 0),
+            targetPosition: new THREE.Vector3(0, 0, 0),
+            grabbedObject: null,
+            clawHeight: 8,
+            clawSpeed: 0.05,
+            prizes: [],
+            handDetected: false,
+            cameraView: 'main',
+            isFist: false
+        };
+
+        // Three.js Setup!!!
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a1a2e);
+
+        const camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 5, 15);
+        camera.lookAt(0, 0, 0);
+
+        const renderer = new THREE.WebGLRenderer({
+            canvas: document.getElementById('game-canvas'),
+            antialias: false
+        });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+
+        // Lighting 💡
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
+        scene.add(ambientLight);
+
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+        directionalLight.position.set(5, 10, 5);
+        directionalLight.castShadow = true;
+        scene.add(directionalLight);
+
+        const backLight = new THREE.PointLight(0x4ecdc4, 0.5);
+        backLight.position.set(-5, 5, -5);
+        scene.add(backLight);
+
+        // Pixel Art Texture Generator
+        function createPixelTexture(color, pattern = 'solid') {
+            const size = 16;
+            const canvas = document.createElement('canvas');
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+            
+            ctx.imageSmoothingEnabled = false;
+            ctx.fillStyle = color;
+            ctx.fillRect(0, 0, size, size);
+            
+            if (pattern === 'striped') {
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+                for (let i = 0; i < size; i += 2) {
+                    ctx.fillRect(i, 0, 1, size);
+                }
+            } else if (pattern === 'checker') {
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+                for (let i = 0; i < size; i += 4) {
+                    for (let j = 0; j < size; j += 4) {
+                        ctx.fillRect(i, j, 2, 2);
+                        ctx.fillRect(i + 2, j + 2, 2, 2);
+                    }
+                }
+            } else if (pattern === 'metal') {
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+                for (let i = 0; i < size; i += 3) {
+                    ctx.fillRect(i, 0, 1, size);
+                }
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+                for (let i = 1; i < size; i += 3) {
+                    ctx.fillRect(i, 0, 1, size);
+                }
+            }
+            
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.magFilter = THREE.NearestFilter;
+            texture.minFilter = THREE.NearestFilter;
+            return texture;
+        }
+
+        // Color Palette
+        const colors = {
+            frame: '#ff6b6b',
+            frameDark: '#ee5a5a',
+            glass: 'rgba(200, 240, 255, 0.3)',
+            metal: '#8b8b8b',
+            platform: '#4ecdc4',
+            platformDark: '#3dbdb5',
+            claw: '#ffe66d',
+            prizes: ['#ff6b6b', '#4ecdc4', '#ffe66d', '#95e1d3', '#f38181', '#aa96da']
+        };
+
+        // Create Claw Machine Frame
+        function createMachineFrame() {
+            const frameGroup = new THREE.Group();
+            
+            // Back panel
+            const backGeometry = new THREE.BoxGeometry(12, 10, 0.2);
+            const backMaterial = new THREE.MeshLambertMaterial({ 
+                map: createPixelTexture(colors.frame, 'striped')
+            });
+            const back = new THREE.Mesh(backGeometry, backMaterial);
+            back.position.set(0, 0, -4);
+            back.castShadow = true;
+            frameGroup.add(back);
+            
+            // Side panels
+            const sideGeometry = new THREE.BoxGeometry(0.2, 10, 8);
+            const sideMaterial = new THREE.MeshLambertMaterial({ 
+                map: createPixelTexture(colors.frame, 'striped')
+            });
+            
+            const leftSide = new THREE.Mesh(sideGeometry, sideMaterial);
+            leftSide.position.set(-6, 0, 0);
+            leftSide.castShadow = true;
+            frameGroup.add(leftSide);
+            
+            const rightSide = new THREE.Mesh(sideGeometry, sideMaterial);
+            rightSide.position.set(6, 0, 0);
+            rightSide.castShadow = true;
+            frameGroup.add(rightSide);
+            
+            // Top panel with gantry rails
+            const topGeometry = new THREE.BoxGeometry(12, 0.5, 8);
+            const topMaterial = new THREE.MeshLambertMaterial({ 
+                map: createPixelTexture(colors.frameDark, 'checker')
+            });
+            const top = new THREE.Mesh(topGeometry, topMaterial);
+            top.position.set(0, 5, 0);
+            top.castShadow = true;
+            frameGroup.add(top);
+            
+            // Gantry rails
+            const railGeometry = new THREE.BoxGeometry(12, 0.3, 0.3);
+            const railMaterial = new THREE.MeshLambertMaterial({ 
+                map: createPixelTexture(colors.metal, 'metal')
+            });
+            
+            const rail1 = new THREE.Mesh(railGeometry, railMaterial);
+            rail1.position.set(0, 4.6, -3);
+            frameGroup.add(rail1);
+            
+            const rail2 = new THREE.Mesh(railGeometry, railMaterial);
+            rail2.position.set(0, 4.6, 3);
+            frameGroup.add(rail2);
+            
+            // Glass front
+            const glassGeometry = new THREE.BoxGeometry(12, 10, 0.1);
+            const glassMaterial = new THREE.MeshLambertMaterial({ 
+                color: 0xccf0ff,
+                transparent: true,
+                opacity: 0.2
+            });
+            const glass = new THREE.Mesh(glassGeometry, glassMaterial);
+            glass.position.set(0, 0, 4);
+            frameGroup.add(glass);
+            
+            // Base
+            const baseGeometry = new THREE.BoxGeometry(14, 0.5, 10);
+            const baseMaterial = new THREE.MeshLambertMaterial({ 
+                map: createPixelTexture(colors.frameDark, 'checker')
+            });
+            const base = new THREE.Mesh(baseGeometry, baseMaterial);
+            base.position.set(0, -5, 0);
+            base.castShadow = true;
+            base.receiveShadow = true;
+            frameGroup.add(base);
+            
+            // Collection chute
+            const chuteGeometry = new THREE.BoxGeometry(2, 3, 2);
+            const chuteMaterial = new THREE.MeshLambertMaterial({ 
+                map: createPixelTexture(colors.platform, 'striped')
+            });
+            const chute = new THREE.Mesh(chuteGeometry, chuteMaterial);
+            chute.position.set(-6, -3.5, 3);
+            chute.castShadow = true;
+            frameGroup.add(chute);
+            
+            return frameGroup;
+        }
+
+        // Create Platform
+        function createPlatform() {
+            const platformGroup = new THREE.Group();
+            
+            // Main platform
+            const platformGeometry = new THREE.BoxGeometry(10, 0.3, 6);
+            const platformMaterial = new THREE.MeshLambertMaterial({ 
+                map: createPixelTexture(colors.platform, 'checker')
+            });
+            const platform = new THREE.Mesh(platformGeometry, platformMaterial);
+            platform.position.set(0, -4.5, 0);
+            platform.receiveShadow = true;
+            platformGroup.add(platform);
+            
+            // Platform divider
+            const dividerGeometry = new THREE.BoxGeometry(0.2, 1, 6);
+            const dividerMaterial = new THREE.MeshLambertMaterial({ 
+                map: createPixelTexture(colors.platformDark, 'solid')
+            });
+            
+            for (let i = -2; i <= 2; i += 1) {
+                const divider = new THREE.Mesh(dividerGeometry, dividerMaterial);
+                divider.position.set(i, -4, 0);
+                divider.castShadow = true;
+                platformGroup.add(divider);
+            }
+            
+            return platformGroup;
+        }
+
+        // Create Claw
+        function createClaw() {
+            const clawGroup = new THREE.Group();
+            
+            // Main body
+            const bodyGeometry = new THREE.BoxGeometry(1.5, 0.8, 1.5);
+            const bodyMaterial = new THREE.MeshLambertMaterial({ 
+                map: createPixelTexture(colors.claw, 'solid')
+            });
+            const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
+            body.castShadow = true;
+            clawGroup.add(body);
+            
+            // Cable
+            const cableGeometry = new THREE.CylinderGeometry(0.05, 0.05, 10, 8);
+            const cableMaterial = new THREE.MeshLambertMaterial({ 
+                map: createPixelTexture(colors.metal, 'metal')
+            });
+            const cable = new THREE.Mesh(cableGeometry, cableMaterial);
+            cable.position.set(0, 5, 0);
+            clawGroup.add(cable);
+            
+            // Claw fingers
+            const fingerGeometry = new THREE.BoxGeometry(0.3, 1.2, 0.3);
+            const fingerMaterial = new THREE.MeshLambertMaterial({ 
+                map: createPixelTexture(colors.metal, 'metal')
+            });
+            
+            const fingerPositions = [
+                { x: 0.6, z: 0.6, rotZ: 0.3 },
+                { x: 0.6, z: -0.6, rotZ: 0.3 },
+                { x: -0.6, z: 0.6, rotZ: -0.3 },
+                { x: -0.6, z: -0.6, rotZ: -0.3 }
+            ];
+            
+            fingerPositions.forEach(pos => {
+                const finger = new THREE.Mesh(fingerGeometry, fingerMaterial);
+                finger.position.set(pos.x, -0.6, pos.z);
+                finger.rotation.z = pos.rotZ;
+                finger.castShadow = true;
+                clawGroup.add(finger);
+            });
+            
+            // Finger tips
+            const tipGeometry = new THREE.SphereGeometry(0.15, 8, 8);
+            const tipMaterial = new THREE.MeshLambertMaterial({ color: 0xff0000 });
+            
+            fingerPositions.forEach(pos => {
+                const tip = new THREE.Mesh(tipGeometry, tipMaterial);
+                tip.position.set(
+                    pos.x + Math.sin(pos.rotZ) * 0.6,
+                    -1.2,
+                    pos.z
+                );
+                clawGroup.add(tip);
+            });
+            
+            clawGroup.position.set(0, gameState.clawHeight, 0);
+            
+            return clawGroup;
+        }
+
+        // Create Prizes
+        function createPrize(type) {
+            const prizeGroup = new THREE.Group();
+            const color = colors.prizes[Math.floor(Math.random() * colors.prizes.length)];
+            
+            let geometry;
+            switch(type) {
+                case 'cube':
+                    geometry = new THREE.BoxGeometry(0.8, 0.8, 0.8);
+                    break;
+                case 'sphere':
+                    geometry = new THREE.SphereGeometry(0.4, 8, 8);
+                    break;
+                case 'cylinder':
+                    geometry = new THREE.CylinderGeometry(0.3, 0.3, 0.8, 8);
+                    break;
+                default:
+                    geometry = new THREE.BoxGeometry(0.8, 0.8, 0.8);
+            }
+            
+            const material = new THREE.MeshLambertMaterial({ 
+                map: createPixelTexture(color, 'checker'),
+                color: color
+            });
+            
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.castShadow = true;
+            prizeGroup.add(mesh);
+            
+            prizeGroup.userData = {
+                type: type,
+                value: type === 'sphere' ? 30 : (type === 'cylinder' ? 20 : 10),
+                grabbed: false
+            };
+            
+            return prizeGroup;
+        }
+
+        // Initialize Scene Objects
+        let machineFrame, platform, claw;
+
+        function initializeScene() {
+            machineFrame = createMachineFrame();
+            scene.add(machineFrame);
+            
+            platform = createPlatform();
+            scene.add(platform);
+            
+            claw = createClaw();
+            scene.add(claw);
+            
+            spawnPrizes();
+        }
+
+        // Spawn Prizes
+        function spawnPrizes() {
+            // Clear existing prizes
+            gameState.prizes.forEach(prize => scene.remove(prize));
+            gameState.prizes = [];
+            
+            const prizeTypes = ['cube', 'cube', 'cube', 'sphere', 'sphere', 'cylinder'];
+            const positions = [];
+            
+            prizeTypes.forEach((type, i) => {
+                const prize = createPrize(type);
+                
+                // Random position within platform bounds
+                let x, z;
+                let validPosition = false;
+                let attempts = 0;
+                
+                while (!validPosition && attempts < 50) {
+                    x = (Math.random() - 0.5) * 8;
+                    z = (Math.random() - 0.5) * 4;
+                    
+                    validPosition = true;
+                    for (const pos of positions) {
+                        const dist = Math.sqrt(Math.pow(x - pos.x, 2) + Math.pow(z - pos.z, 2));
+                        if (dist < 1.5) {
+                            validPosition = false;
+                            break;
+                        }
+                    }
+                    attempts++;
+                }
+                
+                prize.position.set(x, -4, z);
+                scene.add(prize);
+                gameState.prizes.push(prize);
+                positions.push({ x, z });
+            });
+        }
+
+        // Update Claw Position
+        function updateClawPosition() {
+            const lerpFactor = 0.1;
+            
+            // Clamp target position to machine bounds
+            gameState.targetPosition.x = Math.max(-5, Math.min(5, gameState.targetPosition.x));
+            gameState.targetPosition.z = Math.max(-3, Math.min(3, gameState.targetPosition.z));
+            
+            // Smooth interpolation
+            claw.position.x += (gameState.targetPosition.x - claw.position.x) * lerpFactor;
+            claw.position.z += (gameState.targetPosition.z - claw.position.z) * lerpFactor;
+            
+            // Handle claw height based on state
+            const groundLevel = -3;
+            const topLevel = 8;
+            
+            switch (gameState.clawState) {
+                case 'grabbing':
+                    if (claw.position.y > groundLevel) {
+                        claw.position.y -= gameState.clawSpeed;
+                    } else {
+                        attemptGrab();
+                        gameState.clawState = 'returning';
+                    }
+                    break;
+                    
+                case 'returning':
+                    if (claw.position.y < topLevel) {
+                        claw.position.y += gameState.clawSpeed;
+                    } else {
+                        gameState.clawState = 'dropping';
+                    }
+                    break;
+                    
+                case 'dropping':
+                    if (gameState.grabbedObject) {
+                        // Move to collection chute
+                        const targetX = -6;
+                        const targetZ = 3;
+                        
+                        claw.position.x += (targetX - claw.position.x) * lerpFactor;
+                        claw.position.z += (targetZ - claw.position.z) * lerpFactor;
+                        
+                        if (Math.abs(claw.position.x - targetX) < 0.5 && Math.abs(claw.position.z - targetZ) < 0.5) {
+                            releasePrize();
+                            gameState.clawState = 'idle';
+                            gameState.clawHeight = 8;
+                        }
+                    } else {
+                        gameState.clawState = 'idle';
+                        gameState.clawHeight = 8;
+                    }
+                    break;
+                    
+                default: // idle or moving
+                    if (gameState.clawHeight < 8) {
+                        claw.position.y += (gameState.clawHeight - claw.position.y) * lerpFactor;
+                    } else if (claw.position.y < 8) {
+                        claw.position.y += (8 - claw.position.y) * lerpFactor;
+                    }
+            }
+            
+            // Update grabbed object position
+            if (gameState.grabbedObject) {
+                gameState.grabbedObject.position.copy(claw.position);
+                gameState.grabbedObject.position.y -= 1.5;
+            }
+        }
+
+        // Attempt to Grab Prize
+        function attemptGrab() {
+            const grabRadius = 1.5;
+            
+            for (const prize of gameState.prizes) {
+                const distance = claw.position.distanceTo(prize.position);
+                
+                if (distance < grabRadius && !prize.userData.grabbed) {
+                    // Success grab
+                    gameState.grabbedObject = prize;
+                    prize.userData.grabbed = true;
+                    
+                    // Animate claw fingers closing
+                    closeClawFingers();
+                    break;
+                }
+            }
+            
+            if (!gameState.grabbedObject) {
+                // Miss
+                openClawFingers();
+            }
+        }
+
+        // Release Prize
+        function releasePrize() {
+            if (gameState.grabbedObject) {
+                openClawFingers();
+                
+                // Add score
+                gameState.score += gameState.grabbedObject.userData.value;
+                updateScore();
+                
+                // Animate prize dropping
+                const dropAnimation = () => {
+                    if (gameState.grabbedObject.position.y > -6) {
+                        gameState.grabbedObject.position.y -= 0.1;
+                        requestAnimationFrame(dropAnimation);
+                    } else {
+                        // Remove prize from scene
+                        scene.remove(gameState.grabbedObject);
+                        gameState.prizes = gameState.prizes.filter(p => p !== gameState.grabbedObject);
+                        gameState.grabbedObject = null;
+                        
+                        // Spawn new prizes if all collected
+                        if (gameState.prizes.length === 0) {
+                            setTimeout(spawnPrizes, 1000);
+                        }
+                    }
+                };
+                dropAnimation();
+            }
+        }
+
+        // Close Claw Fingers
+        function closeClawFingers() {
+            claw.children.forEach((child, i) => {
+                if (i > 1 && child.geometry.type === 'BoxGeometry') {
+                    child.rotation.z *= 1.5;
+                }
+            });
+        }
+
+        // Open Claw Fingers
+        function openClawFingers() {
+            const fingerPositions = [
+                { x: 0.6, z: 0.6, rotZ: 0.3 },
+                { x: 0.6, z: -0.6, rotZ: 0.3 },
+                { x: -0.6, z: 0.6, rotZ: -0.3 },
+                { x: -0.6, z: -0.6, rotZ: -0.3 }
+            ];
+            
+            claw.children.forEach((child, i) => {
+                if (i > 1 && child.geometry.type === 'BoxGeometry' && fingerPositions[i - 2]) {
+                    child.rotation.z = fingerPositions[i - 2].rotZ;
+                }
+            });
+        }
+
+        // Update Score Display
+        function updateScore() {
+            document.getElementById('score').textContent = `SCORE: ${gameState.score}`;
+        }
+
+        // Update Game Status
+        function updateGameStatus() {
+            const statusEl = document.getElementById('game-status');
+            
+            if (!gameState.handDetected) {
+                statusEl.textContent = 'No hand detected - Show your hand to the camera';
+                statusEl.style.color = '#ff6b6b';
+            } else {
+                switch (gameState.clawState) {
+                    case 'idle':
+                        statusEl.textContent = 'Move hand to control claw';
+                        statusEl.style.color = '#4ecdc4';
+                        break;
+                    case 'grabbing':
+                        statusEl.textContent = 'Grabbing...';
+                        statusEl.style.color = '#ffe66d';
+                        break;
+                    case 'returning':
+                        statusEl.textContent = 'Retrieving prize...';
+                        statusEl.style.color = '#ffe66d';
+                        break;
+                    case 'dropping':
+                        statusEl.textContent = 'Dropping prize...';
+                        statusEl.style.color = '#95e1d3';
+                        break;
+                    default:
+                        statusEl.textContent = '';
+                }
+            }
+        }
+
+        // MediaPipe Setup
+        const videoElement = document.getElementById('video');
+        let hands;
+
+        function setupMediaPipe() {
+            hands = new Hands({
+                locateFile: (file) => {
+                    return `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${file}`;
+                }
+            });
+
+            hands.setOptions({
+                maxNumHands: 1,
+                modelComplexity: 1,
+                minDetectionConfidence: 0.7,
+                minTrackingConfidence: 0.7
+            });
+
+            hands.onResults(onHandResults);
+
+            const cameraUtils = new Camera(videoElement, {
+                onFrame: async () => {
+                    await hands.send({ image: videoElement });
+                },
+                width: 640,
+                height: 480
+            });
+
+            cameraUtils.start()
+                .then(() => {
+                    document.getElementById('loading').style.display = 'none';
+                })
+                .catch(err => {
+                    console.error('Camera error:', err);
+                    document.getElementById('loading').textContent = 'Camera error - Using mouse control';
+                    document.getElementById('loading').style.color = '#ff6b6b';
+                });
+        }
+
+        // Handle Hand Detection Results
+        function onHandResults(results) {
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                gameState.handDetected = true;
+                const landmarks = results.multiHandLandmarks[0];
+                
+                // Get wrist position (landmark 0) for movement
+                const wrist = landmarks[0];
+                
+                // Map hand position to claw position
+                // Camera view coordinates (0-1) to machine coordinates (-5 to 5)
+                const targetX = (0.5 - wrist.x) * 10;
+                const targetZ = (wrist.y - 0.5) * 6;
+                
+                gameState.targetPosition.x = targetX;
+                gameState.targetPosition.z = targetZ;
+                
+                // Detect fist gesture
+                // Check if fingertips are close to palm
+                const fingerTips = [8, 12, 16, 20];
+                const palmBase = landmarks[0];
+                let isFist = true;
+                
+                for (const tipIndex of fingerTips) {
+                    const tip = landmarks[tipIndex];
+                    const distance = Math.sqrt(
+                        Math.pow(tip.x - palmBase.x, 2) + 
+                        Math.pow(tip.y - palmBase.y, 2)
+                    );
+                    
+                    if (distance > 0.15) {
+                        isFist = false;
+                        break;
+                    }
+                }
+                
+                // Handle grab/release based on fist state
+                if (isFist && !gameState.isFist && gameState.clawState === 'idle') {
+                    // Fist closed - grab
+                    gameState.clawState = 'grabbing';
+                } else if (!isFist && gameState.isFist && gameState.clawState === 'returning') {
+                    // Fist opened - release
+                    gameState.clawState = 'dropping';
+                }
+                
+                gameState.isFist = isFist;
+            } else {
+                gameState.handDetected = false;
+            }
+        }
+
+        // Mouse Fallback Control
+        let isMouseDown = false;
+
+        function setupMouseControls() {
+            const canvas = document.getElementById('game-canvas');
+            
+            canvas.addEventListener('mousemove', (e) => {
+                if (!gameState.handDetected) {
+                    const rect = canvas.getBoundingClientRect();
+                    const x = ((e.clientX - rect.left) / rect.width - 0.5) * 10;
+                    const z = ((e.clientY - rect.top) / rect.height - 0.5) * 6;
+                    
+                    gameState.targetPosition.x = x;
+                    gameState.targetPosition.z = z;
+                }
+            });
+            
+            canvas.addEventListener('mousedown', () => {
+                if (!gameState.handDetected && gameState.clawState === 'idle') {
+                    gameState.clawState = 'grabbing';
+                }
+                isMouseDown = true;
+            });
+            
+            canvas.addEventListener('mouseup', () => {
+                if (!gameState.handDetected && gameState.clawState === 'returning') {
+                    gameState.clawState = 'dropping';
+                }
+                isMouseDown = false;
+            });
+            
+            // Touch support
+            canvas.addEventListener('touchmove', (e) => {
+                e.preventDefault();
+                if (!gameState.handDetected) {
+                    const rect = canvas.getBoundingClientRect();
+                    const touch = e.touches[0];
+                    const x = ((touch.clientX - rect.left) / rect.width - 0.5) * 10;
+                    const z = ((touch.clientY - rect.top) / rect.height - 0.5) * 6;
+                    
+                    gameState.targetPosition.x = x;
+                    gameState.targetPosition.z = z;
+                }
+            });
+            
+            canvas.addEventListener('touchstart', () => {
+                if (!gameState.handDetected && gameState.clawState === 'idle') {
+                    gameState.clawState = 'grabbing';
+                }
+            });
+            
+            canvas.addEventListener('touchend', () => {
+                if (!gameState.handDetected && gameState.clawState === 'returning') {
+                    gameState.clawState = 'dropping';
+                }
+            });
+        }
+
+        // UI Controls
+        function setupUIControls() {
+            document.getElementById('reset-btn').addEventListener('click', () => {
+                gameState.score = 0;
+                updateScore();
+                gameState.clawState = 'idle';
+                gameState.grabbedObject = null;
+                gameState.clawHeight = 8;
+                spawnPrizes();
+            });
+            
+            document.getElementById('camera-btn').addEventListener('click', () => {
+                if (gameState.cameraView === 'main') {
+                    camera.position.set(0, 12, 5);
+                    camera.lookAt(0, 0, 0);
+                    gameState.cameraView = 'top';
+                } else {
+                    camera.position.set(0, 5, 15);
+                    camera.lookAt(0, 0, 0);
+                    gameState.cameraView = 'main';
+                }
+            });
+        }
+
+        // Window Resize Handler
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // Animation Loop
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            updateClawPosition();
+            updateGameStatus();
+            
+            renderer.render(scene, camera);
+        }
+
+        // Initialize Game
+        function init() {
+            initializeScene();
+            setupMediaPipe();
+            setupMouseControls();
+            setupUIControls();
+            window.addEventListener('resize', onWindowResize);
+            
+            animate();
+        }
+
+        // Start the game
+        init();
+    </script>
+</body>
+</html>
