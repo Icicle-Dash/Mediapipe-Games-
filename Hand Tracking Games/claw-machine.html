@@ -12,7 +12,7 @@
         }
         
         body {
-            font-family: 'Courier New', monospace;
+            font-family: Arial, Helvetica, sans-serif;
             background: #1a1a2e;
             overflow: hidden;
             display: flex;
@@ -190,48 +190,6 @@
         backLight.position.set(-5, 5, -5);
         scene.add(backLight);
 
-        // Pixel Art Texture Generator
-        function createPixelTexture(color, pattern = 'solid') {
-            const size = 16;
-            const canvas = document.createElement('canvas');
-            canvas.width = size;
-            canvas.height = size;
-            const ctx = canvas.getContext('2d');
-            
-            ctx.imageSmoothingEnabled = false;
-            ctx.fillStyle = color;
-            ctx.fillRect(0, 0, size, size);
-            
-            if (pattern === 'striped') {
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
-                for (let i = 0; i < size; i += 2) {
-                    ctx.fillRect(i, 0, 1, size);
-                }
-            } else if (pattern === 'checker') {
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
-                for (let i = 0; i < size; i += 4) {
-                    for (let j = 0; j < size; j += 4) {
-                        ctx.fillRect(i, j, 2, 2);
-                        ctx.fillRect(i + 2, j + 2, 2, 2);
-                    }
-                }
-            } else if (pattern === 'metal') {
-                ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-                for (let i = 0; i < size; i += 3) {
-                    ctx.fillRect(i, 0, 1, size);
-                }
-                ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
-                for (let i = 1; i < size; i += 3) {
-                    ctx.fillRect(i, 0, 1, size);
-                }
-            }
-            
-            const texture = new THREE.CanvasTexture(canvas);
-            texture.magFilter = THREE.NearestFilter;
-            texture.minFilter = THREE.NearestFilter;
-            return texture;
-        }
-
         // Color Palette
         const colors = {
             frame: '#ff6b6b',
@@ -251,7 +209,7 @@
             // Back panel
             const backGeometry = new THREE.BoxGeometry(12, 10, 0.2);
             const backMaterial = new THREE.MeshLambertMaterial({ 
-                map: createPixelTexture(colors.frame, 'striped')
+                color: colors.frame
             });
             const back = new THREE.Mesh(backGeometry, backMaterial);
             back.position.set(0, 0, -4);
@@ -261,7 +219,7 @@
             // Side panels
             const sideGeometry = new THREE.BoxGeometry(0.2, 10, 8);
             const sideMaterial = new THREE.MeshLambertMaterial({ 
-                map: createPixelTexture(colors.frame, 'striped')
+                color: colors.frame
             });
             
             const leftSide = new THREE.Mesh(sideGeometry, sideMaterial);
@@ -277,7 +235,7 @@
             // Top panel with gantry rails
             const topGeometry = new THREE.BoxGeometry(12, 0.5, 8);
             const topMaterial = new THREE.MeshLambertMaterial({ 
-                map: createPixelTexture(colors.frameDark, 'checker')
+                color: colors.frameDark
             });
             const top = new THREE.Mesh(topGeometry, topMaterial);
             top.position.set(0, 5, 0);
@@ -287,7 +245,7 @@
             // Gantry rails
             const railGeometry = new THREE.BoxGeometry(12, 0.3, 0.3);
             const railMaterial = new THREE.MeshLambertMaterial({ 
-                map: createPixelTexture(colors.metal, 'metal')
+                color: colors.metal
             });
             
             const rail1 = new THREE.Mesh(railGeometry, railMaterial);
@@ -312,7 +270,7 @@
             // Base
             const baseGeometry = new THREE.BoxGeometry(14, 0.5, 10);
             const baseMaterial = new THREE.MeshLambertMaterial({ 
-                map: createPixelTexture(colors.frameDark, 'checker')
+                color: colors.frameDark
             });
             const base = new THREE.Mesh(baseGeometry, baseMaterial);
             base.position.set(0, -5, 0);
@@ -323,7 +281,7 @@
             // Collection chute
             const chuteGeometry = new THREE.BoxGeometry(2, 3, 2);
             const chuteMaterial = new THREE.MeshLambertMaterial({ 
-                map: createPixelTexture(colors.platform, 'striped')
+                color: colors.platform
             });
             const chute = new THREE.Mesh(chuteGeometry, chuteMaterial);
             chute.position.set(-6, -3.5, 3);
@@ -340,7 +298,7 @@
             // Main platform
             const platformGeometry = new THREE.BoxGeometry(10, 0.3, 6);
             const platformMaterial = new THREE.MeshLambertMaterial({ 
-                map: createPixelTexture(colors.platform, 'checker')
+                color: colors.platform 
             });
             const platform = new THREE.Mesh(platformGeometry, platformMaterial);
             platform.position.set(0, -4.5, 0);
@@ -350,7 +308,7 @@
             // Platform divider
             const dividerGeometry = new THREE.BoxGeometry(0.2, 1, 6);
             const dividerMaterial = new THREE.MeshLambertMaterial({ 
-                map: createPixelTexture(colors.platformDark, 'solid')
+                color: colors.platform
             });
             
             for (let i = -2; i <= 2; i += 1) {
@@ -379,7 +337,7 @@
             // Cable
             const cableGeometry = new THREE.CylinderGeometry(0.05, 0.05, 10, 8);
             const cableMaterial = new THREE.MeshLambertMaterial({ 
-                map: createPixelTexture(colors.metal, 'metal')
+                color: colors.metal
             });
             const cable = new THREE.Mesh(cableGeometry, cableMaterial);
             cable.position.set(0, 5, 0);
@@ -446,7 +404,6 @@
             }
             
             const material = new THREE.MeshLambertMaterial({ 
-                map: createPixelTexture(color, 'checker'),
                 color: color
             });
             
