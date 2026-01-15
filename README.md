@@ -9,5 +9,6 @@ Collection of games that use mediapipe features for interactivity
 ### Games to be made:
 - Colour Hunt (Find and show specific colours to the camera)
 - Rock Paper Scissors (Hand gestures against an AI opponent)
+- Whack a Mole (Tap your fingers whenever moles appear)
 
 
