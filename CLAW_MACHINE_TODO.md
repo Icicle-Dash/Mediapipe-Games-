@@ -3,7 +3,6 @@
 ## Simple To-Do List
 
 - [ ] Remove complex machine panels (combine into fewer parts)
-- [ ] Remove claw finger animations
 - [ ] Simplify state machine logic
 - [ ] Remove camera toggle button
 - [ ] Reduce CSS animations
